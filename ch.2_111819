@@ -1,0 +1,875 @@
+setwd("~/Master's research/Post-grad/Chapter_2")
+library(readxl)
+# load in Master list. Omits text comments and variables with missing values.
+masterlist <- read_excel("Rawdata_ch2.xlsx", col_types = c("numeric", "skip", "text", 
+     "text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", 
+     "text", "text", "numeric", "numeric", "text", "text", "numeric", "text", "numeric",
+     "numeric", "numeric", "skip", "text", "text", "skip", "numeric", "numeric", 
+     "numeric", "text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric",
+     "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric",
+     "numeric", "numeric", "numeric", "numeric", "skip", "skip"))
+
+# remove releves that I excluded from analyses due to recent harvest
+worm.data <- masterlist[c(-11, -14, -19, -31),]
+
+# retain variables for logistic regression testing
+worm1.data <- worm.data[, c(7, 8, 9, 10, 14, 15, 16, 17, 18, 19,
+     20, 21, 24, 25, 26, 33, 34)]
+
+# retain variables for regression/correlation testing. Exclude non-numeric variables.
+worm2.data <- worm1.data[, c(-6, -7, -9)]
+
+# look at how environmental variables are correlated amongst themselves
+worm.cor <- cor(worm2.data)
+write.csv(worm.cor, file = "worm1.cor_030819.csv")
+
+library(stringi)
+library(Hmisc)
+worm.corr <- rcorr(as.matrix(worm2.data))
+flattenCorrMatrix <- function(cormat, pmat) {
+ ut <- upper.tri(cormat)
+ data.frame(
+  row = rownames(cormat)[row(cormat)[ut]],
+  column = rownames(cormat)[col(cormat)[ut]],
+  cor  =(cormat)[ut],
+  p = pmat[ut]
+ )
+}
+worm.corr1 <- flattenCorrMatrix(worm.corr$r, worm.corr$P)
+worm.corr2 <- worm.corr1[order(worm.corr1$p),] 
+worm.corr2
+# environmental variables that were significantly correlated were the A & O 
+# horizons (negatively), and the year of origin and stand age (somewhat obviously)
+# conclusion: there is a significant negative correlation between 
+# the A horizon and the O horizon (r= -.80, n=41, p<.01)
+
+summary(as.factor(worm.data$worms_pres))
+# Earthworms were present in 35/41 releves. Absent in 6/41.
+
+# Visualize earthworm data using box plots
+worms <- worm.data$worms_pres
+par(mfrow=c(2,3)) 
+boxplot(worm2.data$month_now~worms,xlab="Eathworm presence", ylab="Month surveyed")
+boxplot(worm2.data$elev_ft~worms,xlab="Eathworm presence", ylab="Elevation (ft)")
+boxplot(worm2.data$perslope~worms,xlab="Eathworm presence", ylab="Slope(%)")
+boxplot(worm2.data$stand_age_2017~worms,xlab="Eathworm presence", ylab="Stand Age")
+boxplot(worm2.data$new_a~worms,xlab="Eathworm presence", ylab="A horizon")
+boxplot(worm2.data$new_o~worms,xlab="Eathworm presence", ylab="O horizon")
+dev.off()
+boxplot(worm2.data$new_o~worms,main="O Horizon Thickness", 
+        xlab="Presence of invasive earthworms",
+        ylab="O horizon (cm)")
+
+# test variables by ANOVA
+a_horiz.aov <- aov(worm2.data$new_a~as.factor(worms))
+summary(a_horiz.aov)
+# A horizon is highly significant for predicting earthworm presence
+
+o_horiz.aov <- aov(worm2.data$new_o~as.factor(worms))
+summary(o_horiz.aov)
+# O horizon is even more highly significant for predicting earthworm presence
+
+# testing other variables...
+perslope.aov <- aov(worm2.data$perslope~as.factor(worms))
+summary(perslope.aov)
+standage.aov <- aov(worm2.data$stand_age_2017~as.factor(worms))
+summary(standage.aov)
+elevft.aov <- aov(worm2.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm2.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm2.data$new_utm_e~as.factor(worms))
+summary(easting.aov)
+northing.aov <- aov(worm2.data$new_utm_n~as.factor(worms))
+summary(northing.aov)
+overstory.aov <- aov(worm2.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm2.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+ctop.aov <- aov(worm2.data$ctop~as.factor(worms))
+summary(ctop.aov)
+tex.aov <- aov(worm2.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+yoo.aov <- aov(worm2.data$yoo~as.factor(worms))
+summary(yoo.aov)
+# Conclusion of AOV tests: 
+# O and A horizons are highly significant for predicting earthworm presence
+# However, the O and A horizons were also highly correlated (line 39)
+# Highly correlated environmental variables (w/ correlations greater than .7)
+# are a concern for model building. Therefore, I will remove the A horizon 
+# because it is less significant and retain the O horizon
+
+# end of EDA
+
+############################ onto the GLM!
+wormpres.data <- cbind(worms, worm2.data$new_o)
+colnames(wormpres.data) <- c("worms","new_o")
+wormpres.data <- as.data.frame(wormpres.data)
+# fit the GLM:
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial)
+# weights for glm
+p <- length(worms[worms==1])  	# presences 
+a <- length(worms[worms==0])  	# absences
+w <- p/a			# relative weight of each absence
+wormpres.wts <- rep(1,length(worms))
+wormpres.wts[worms==0] <- w	
+# refit:
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial, 
+                    weights=wormpres.wts)
+# print the fitted model (i.e., the coefficients):
+print(wormpres.glm)
+# a concise summary, with tests of the linear predictors (t-tests)
+summary(wormpres.glm)
+# ANOVA test of the linked model:
+anova(wormpres.glm, test="Chi")
+# looks significant
+
+# a P value, based on null (initial) and residual deviance, Chi-square,
+# and the degrees of freedom (# of estimated coefficients)...
+# DF is # of predictors + 1 (for the intercept term):
+wormpres.glm.p <- 1 - pchisq(wormpres.glm$null - wormpres.glm$deviance, 2) 
+wormpres.glm.p # print the P-value
+
+# approximate explanatory value (R^2 as deviance):
+wormpres.glm.d <- 1 - (wormpres.glm$deviance/wormpres.glm$null)
+wormpres.glm.d
+# r2 value of .57
+
+# summary of the glm:
+summary(wormpres.glm)
+
+# model evaluation in terms of classification success 
+# (how well did the model do at correctly classifying releves as wormed or unwormed?)
+
+# threshold to a binary prediction, here at p(hab)=0.5:
+wormpres.glm.p50 <- wormpres.glm$fitted.value
+wormpres.glm.p50[wormpres.glm.p50<0.50] <- 0
+wormpres.glm.p50[wormpres.glm.p50>=0.50] <- 1
+
+# confusion matrix, cut-off at p=0.5:
+# rows are model fits, columns are actual data
+orig.confusion.matrix <- table(wormpres.glm.p50,worms)
+orig.confusion.matrix
+# percent correct is (sum of diagonals)/(sum over full table),
+# but note asymetry of success rates of presences and absences
+# summary: model predicted that worms were going to be absent and worms were absent 5x
+# the model predicted that worms were going to be absent and worms were present 4x
+# the model predicted that worms were going to be present and worms were present 31x
+# the model predicted that worms were going to be present and worms were absent 1x
+# total percent correct: 36/41 = 88% success rate
+
+# tuning the model using ROC curves
+library(caTools)
+library(ROCR)
+# create a "prediction" object (table of predicted & actual values):
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.pred
+# create a "performance" object with true positives, false positives:
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+
+# plot a ROC curve:
+plot(wormpres.perf, colorize=TRUE,lwd=3)
+abline(0,1) # adds the 1:1 line
+
+# compute the area under the ROC curve (AUC):
+performance(wormpres.pred, "auc")
+
+# plot sensitivity and specificity together
+# sensitivity: model's ability to correctly predict "true" cases (true positive rate) 
+# specificity: model's ability to not predict false positives (true negative rate)
+plot(performance(wormpres.pred, "sens"),col="blue", lwd=2,ylab="Performance")
+plot(performance(wormpres.pred, "spec"), add=TRUE, col="red",lwd=2)
+legend("top", horiz=T,legend=c("Sensitivity","Specificity"), 
+       text.col=c("blue","red"),bty="n")
+box(lwd=2) # make the bounding box thicker
+
+plot(performance(wormpres.pred, "phi"),lwd=2,col="orange")
+# oddly, ROCR doesn't tell you what cut-off value to use ...
+# to retrieve actual cut-off values, use this function (code from Dean Urban):
+#####
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ # This uses ROCR's functions:
+ require('ROCR')
+ # The argument "pred" must be a prediction object from ROCR.
+ #
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ 
+ # Build the performance object. Use (1-FPR)=TNR so the x.measure
+ # scales properly relative to TPR.
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ 
+ # (1) method=1: maximum Se+Sp, an appropriate tuning is to 
+ # find the max sum of TPR and TNR (which finds the max PHI).
+ if (method==1) 
+  # The index of the cut-off value that maximizes the sum of Se and Sp:
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ 
+ # (2) method=2:  find the intersection of Se and Sp:
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ 
+ # method=3:  target a user-specified TPR (default=0.95):
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ 
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+#####
+
+# accept the default: "max" maximizes the SUM of TPR and TNR
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+#  summary: the model predicted that worms were going to be absent 
+# and worms were absent 5x
+# the model predicted that worms were going to be absent and worms were present 2x
+# the model predicted that worms were going to be present and worms were present 33x
+# the model predicted that worms were going to be present and worms were absent 1x
+# total percent correct: 38/41 (correctly classified 2 additional plots)= 93% success
+
+# make a graph of the probability of the presence of earthworms, including ROC cutoff
+library(ggplot2)
+
+ggplot(worm2.data,aes(x=worm2.data$new_o, y=worms))+
+  geom_point(position = position_jitter(height=.02, width=0))+
+  geom_smooth(method = "glm", method.args=list(family=binomial), 
+              aes(weight = wormpres.wts))+
+  geom_hline(yintercept = .33) + 
+  labs(x="Thickness of O horizon (cm)", 
+       y= "Probability of invasive earthworm presence")+
+  ggtitle(" ")+
+  theme_bw()
+
+################################## checking for spatial autocorrelation
+drop <- c(1508, 1523, 1578, 1894, 2205)
+head(!(masterlist$relnum %in% drop))
+masterlist1_lim <- masterlist[!(masterlist$relnum %in% drop),]
+merged_releves <- masterlist1_lim
+# fit glm model with new merged table that includes spatial info
+wormpres.glm <- glm(as.factor(worms)~new_o, data=merged_releves, 
+                    family=binomial, weights=wormpres.wts)
+
+library(sp)
+library(spdep)
+coordinates(merged_releves) <- ~new_utm_e + new_utm_n
+
+# telling it what projection system to use (15N)
+proj4string(merged_releves) <- CRS("+init=epsg:26915")
+
+# create a matrix showing the Euclidean distances between releves
+d <- as.matrix(dist(coordinates(merged_releves)))
+wts <- 1/(d/1000)
+wts[is.infinite(wts)] <- 0
+
+# standardizing the distances so that the weighting all adds up to 1
+for(k in 1:dim(wts)[1]){
+  wts[k,] <- wts[k,]/sum(wts[k,])
+}
+rowSums(wts)
+####starting here, I'm not sure what I need anymore
+
+# Moran's residuals
+
+# moran scatter plot
+# Moran scatter plot:  assesses similarity between an observed 
+# value and neighboring observations
+# x= how much the model missed by
+# y= how much the model missed by for each pts neightbors
+# what we are changing when we do different versions is:
+# what our measure of how much we missed by was
+library(ncf)
+##################################################################
+par(mfrow=c(1,2))
+r <- residuals(wormpres.glm, type="resp") # response residuals
+## people generally use these residuals
+moran.plot(r,mat2listw(wts),labels=FALSE,xlab="Response Residual",
+           ylab="Spatially Lagged Response Residual") # moran plot
+
+r <- residuals(wormpres.glm, type="deviance")
+moran.plot(r,mat2listw(wts),labels=FALSE,xlab="Deviance Residual",
+           ylab="Spatially Lagged Deviance Residual")
+par(mfrow=c(1,1))
+# correlation between lagged variables and not lagged variables
+
+# lm morans test
+lm.morantest(wormpres.glm,resfun=function(x){residuals(x,type="resp")},
+             mat2listw(wts))
+lm.morantest(wormpres.glm,resfun=function(x){residuals(x,type="deviance")},
+             mat2listw(wts))
+## I can report both of these p values
+## predicted probability minus the actual probability of geographic location
+
+# I do want this one. Uses weighted residuals.
+# standard deviate- more or less equivalent to z score
+# conclusion: the spatial distribution of earthworms is
+# more spatially clustered than would be expected if underlying 
+# spatial processes were random
+
+#correlogram
+# call is correlog(X, Y, Z=var of interest, bin size, resamples for P-value, .)
+# make sure you define R. R is either response or deviance residuals. 
+# this is making a spatial correlogram
+ndvi.cgram<-correlog(merged_releves$new_utm_e,merged_releves$new_utm_n,
+                     r, increment=5000, resamp=100, latlon= FALSE)
+
+# create a vector of plotting symbols, set to 1 (= open circle);
+# grab the P-values from the test,
+# set the plotting symbol to 19 (solid circle) if the correlation is significant:
+ndvi.psig <- rep(1,length(ndvi.cgram$p))
+ndvi.psig[ndvi.cgram$p<=0.05] <- 19
+# -> if I wanted to use bonferroni correction: 
+# ndvi.psig[ndvi.cgram$p<=(0.05/length(ndvi.cgram$p))] <- 19
+# plot it.  you'll have to set XLIM for your data range:
+options(scipen=999)
+plot(ndvi.cgram$mean.of.class/1000, ndvi.cgram$correlation,
+     xlab="Distance (km)", ylab="Moran's I", xlim=c(0,85),ylim=c(-1.0,1.0),
+     type="b", pch=ndvi.psig, lwd=3, cex.axis=1.25, cex.lab=1.5,col="green",cex=2)
+box(lwd=2)
+title("Spatial correlogram for response residuals")
+options(scipen=0, digits=7)
+# I can make a correlogram for my response variable (presence/absence of earthworms),
+# or I can make a correlogram of my response residuals
+
+# use stargazer program to print output
+
+######################
+#predict old data
+predict.glm(wormpres.glm, type="response") #prediction in-sample
+oldData1 = data.frame(masterlist$old_o)
+colnames(oldData1) = c("new_o")
+historic.wormed.pred <- predict.glm(wormpres.glm, newdata=oldData1, type="response")
+#prediction on old_o
+# apply ROC curve cutoff value
+#must have less than a 33% chance of being unwormed to be 
+# classified as unwormed historically
+historic.wormed.pred.px <- historic.wormed.pred
+historic.wormed.pred.px[historic.wormed.pred.px<cutoff] <- 0
+historic.wormed.pred.px[historic.wormed.pred.px>=cutoff] <- 1
+write.csv(historic.wormed.pred.px, 
+          file = "historic.wormed.pred.px.csv")
+
+wormpres.glm$fitted.value
+historic.wormed.pred.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+
+############ repeat with different earthworm ecological groups
+
+# skip epigeic earthworm group because this is the same as overall grouping
+# (if earthworms were present, epigeic earthworms were always present)
+##epi-endogeic
+summary(as.factor(worm.data$epiendogeic_worms_pres))
+worms <- worm.data$epiendogeic_worms_pres
+a_horiz.aov <- aov(worm2.data$new_a~as.factor(worms))
+summary(a_horiz.aov)
+o_horiz.aov <- aov(worm2.data$new_o~as.factor(worms))
+summary(o_horiz.aov)
+perslope.aov <- aov(worm2.data$perslope~as.factor(worms))
+summary(perslope.aov)
+standage.aov <- aov(worm2.data$stand_age_2017~as.factor(worms))
+summary(standage.aov)
+elevft.aov <- aov(worm2.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm2.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm2.data$new_utm_e~as.factor(worms))
+summary(easting.aov)
+northing.aov <- aov(worm2.data$new_utm_n~as.factor(worms))
+summary(northing.aov)
+overstory.aov <- aov(worm2.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm2.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+ctop.aov <- aov(worm2.data$ctop~as.factor(worms))
+summary(ctop.aov)
+tex.aov <- aov(worm2.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+yoo.aov <- aov(worm2.data$yoo~as.factor(worms))
+summary(yoo.aov)
+wormpres.data <- cbind(worms, worm2.data$new_o)
+colnames(wormpres.data) <- c("worms","new_o")
+wormpres.data <- as.data.frame(wormpres.data)
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial)
+p <- length(worms[worms==1])  	# presences 
+a <- length(worms[worms==0])  	# absences
+w <- p/a			# relative weight of each absence
+wormpres.wts <- rep(1,length(worms))
+wormpres.wts[worms==0] <- w	
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial, 
+    weights=wormpres.wts)
+print(wormpres.glm)
+summary(wormpres.glm)
+anova(wormpres.glm, test="Chi")
+wormpres.glm.p <- 1 - pchisq(wormpres.glm$null - wormpres.glm$deviance, 2) 
+wormpres.glm.p
+wormpres.glm.d <- 1 - (wormpres.glm$deviance/wormpres.glm$null)
+wormpres.glm.d
+summary(wormpres.glm)
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ require('ROCR')
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ if (method==1)
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+
+##endogeic
+summary(as.factor(worm.data$endogeic_worms_pres))
+worms <- worm.data$endogeic_worms_pres
+a_horiz.aov <- aov(worm2.data$new_a~as.factor(worms))
+summary(a_horiz.aov) #
+o_horiz.aov <- aov(worm2.data$new_o~as.factor(worms))
+summary(o_horiz.aov) ##
+perslope.aov <- aov(worm2.data$perslope~as.factor(worms))
+summary(perslope.aov) #
+standage.aov <- aov(worm2.data$stand_age_2017~as.factor(worms))
+summary(standage.aov)
+elevft.aov <- aov(worm2.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm2.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm2.data$new_utm_e~as.factor(worms))
+summary(easting.aov) #
+northing.aov <- aov(worm2.data$new_utm_n~as.factor(worms))
+summary(northing.aov)
+overstory.aov <- aov(worm2.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm2.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+tex.aov <- aov(worm2.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+yoo.aov <- aov(worm2.data$yoo~as.factor(worms))
+summary(yoo.aov)
+wormpres.data <- cbind(worms, worm2.data$new_o, worm2.data$perslope, 
+                       worm2.data$new_utm_e)
+colnames(wormpres.data) <- c("worms","new_o", "perslope", "easting")
+wormpres.data <- as.data.frame(wormpres.data)
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial)
+p <- length(worms[worms==1]) 
+a <- length(worms[worms==0])  
+w <- p/a		
+wormpres.wts <- rep(1,length(worms))
+wormpres.wts[worms==0] <- w	
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial, 
+                    weights=wormpres.wts)
+print(wormpres.glm)
+summary(wormpres.glm) 
+step(wormpres.glm) # drop slope
+wormpres.glm <- glm(as.factor(worms)~new_o + easting, data=wormpres.data, 
+           family=binomial, weights=wormpres.wts)
+summary(wormpres.glm) 
+drop1(wormpres.glm)
+anova(wormpres.glm, test="Chi")
+wormpres.glm.p <- 1 - pchisq(wormpres.glm$null - wormpres.glm$deviance, 2) 
+wormpres.glm.p
+wormpres.glm.d <- 1 - (wormpres.glm$deviance/wormpres.glm$null)
+wormpres.glm.d
+summary(wormpres.glm)
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ require('ROCR')
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ if (method==1)
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+
+# anecic
+summary(as.factor(worm.data$anecic_worms_pres))
+worms <- worm.data$anecic_worms_pres
+a_horiz.aov <- aov(worm2.data$new_a~as.factor(worms))
+summary(a_horiz.aov)
+o_horiz.aov <- aov(worm2.data$new_o~as.factor(worms))
+summary(o_horiz.aov) #
+perslope.aov <- aov(worm2.data$perslope~as.factor(worms))
+summary(perslope.aov) 
+standage.aov <- aov(worm2.data$stand_age_2017~as.factor(worms))
+summary(standage.aov)
+elevft.aov <- aov(worm2.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm2.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm2.data$new_utm_e~as.factor(worms))
+summary(easting.aov) 
+northing.aov <- aov(worm2.data$new_utm_n~as.factor(worms))
+summary(northing.aov) #
+overstory.aov <- aov(worm2.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm2.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+tex.aov <- aov(worm2.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+yoo.aov <- aov(worm2.data$yoo~as.factor(worms))
+summary(yoo.aov)
+wormpres.data <- cbind(worms, worm2.data$new_o, worm2.data$new_utm_n)
+colnames(wormpres.data) <- c("worms","new_o", "northing")
+wormpres.data <- as.data.frame(wormpres.data)
+p <- length(worms[worms==1]) 
+a <- length(worms[worms==0])  
+w <- p/a		
+wormpres.wts <- rep(1,length(worms))
+wormpres.wts[worms==0] <- w	
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial, 
+                    weights=wormpres.wts)
+print(wormpres.glm)
+summary(wormpres.glm) 
+step(wormpres.glm) # drop northing
+wormpres.glm <- glm(as.factor(worms)~new_o, data=wormpres.data, 
+                    family=binomial, weights=wormpres.wts)
+summary(wormpres.glm) 
+step(wormpres.glm)
+anova(wormpres.glm, test="Chi")
+wormpres.glm.p <- 1 - pchisq(wormpres.glm$null - wormpres.glm$deviance, 2) 
+wormpres.glm.p
+wormpres.glm.d <- 1 - (wormpres.glm$deviance/wormpres.glm$null)
+wormpres.glm.d
+summary(wormpres.glm)
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ require('ROCR')
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ if (method==1)
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+
+# epi-endogeic/anecic
+summary(as.factor(worm.data$epiendogeic_anecic_worms_pres))
+worms <- worm.data$epiendogeic_anecic_worms_pres
+a_horiz.aov <- aov(worm2.data$new_a~as.factor(worms))
+summary(a_horiz.aov) #
+o_horiz.aov <- aov(worm2.data$new_o~as.factor(worms))
+summary(o_horiz.aov) #
+perslope.aov <- aov(worm2.data$perslope~as.factor(worms))
+summary(perslope.aov) 
+standage.aov <- aov(worm2.data$stand_age_2017~as.factor(worms))
+summary(standage.aov)
+elevft.aov <- aov(worm2.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm2.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm2.data$new_utm_e~as.factor(worms))
+summary(easting.aov) 
+northing.aov <- aov(worm2.data$new_utm_n~as.factor(worms))
+summary(northing.aov) #
+overstory.aov <- aov(worm2.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm2.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+tex.aov <- aov(worm2.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+yoo.aov <- aov(worm2.data$yoo~as.factor(worms))
+summary(yoo.aov)
+wormpres.data <- cbind(worms, worm2.data$new_o, worm2.data$new_utm_n)
+colnames(wormpres.data) <- c("worms","new_o", "northing")
+wormpres.data <- as.data.frame(wormpres.data)
+p <- length(worms[worms==1]) 
+a <- length(worms[worms==0])  
+w <- p/a		
+wormpres.wts <- rep(1,length(worms))
+wormpres.wts[worms==0] <- w	
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial, 
+                    weights=wormpres.wts)
+print(wormpres.glm)
+summary(wormpres.glm) 
+step(wormpres.glm) 
+summary(wormpres.glm) 
+anova(wormpres.glm, test="Chi")
+wormpres.glm.p <- 1 - pchisq(wormpres.glm$null - wormpres.glm$deviance, 2) 
+wormpres.glm.p
+wormpres.glm.d <- 1 - (wormpres.glm$deviance/wormpres.glm$null)
+wormpres.glm.d
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ require('ROCR')
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ if (method==1)
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+
+# non-epigeic
+summary(as.factor(worm.data$non_epigeic_worms_pres))
+worms <- worm.data$non_epigeic_worms_pres
+a_horiz.aov <- aov(worm2.data$new_a~as.factor(worms))
+summary(a_horiz.aov) #
+o_horiz.aov <- aov(worm2.data$new_o~as.factor(worms))
+summary(o_horiz.aov) #
+perslope.aov <- aov(worm2.data$perslope~as.factor(worms))
+summary(perslope.aov) #
+standage.aov <- aov(worm2.data$stand_age_2017~as.factor(worms))
+summary(standage.aov)
+elevft.aov <- aov(worm2.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm2.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm2.data$new_utm_e~as.factor(worms))
+summary(easting.aov) 
+northing.aov <- aov(worm2.data$new_utm_n~as.factor(worms))
+summary(northing.aov) #
+overstory.aov <- aov(worm2.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm2.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm2.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+tex.aov <- aov(worm2.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+yoo.aov <- aov(worm2.data$yoo~as.factor(worms))
+summary(yoo.aov)
+wormpres.data <-cbind(worms, worm2.data$new_o, worm2.data$perslope, worm2.data$new_utm_n)
+colnames(wormpres.data) <- c("worms","new_o", "slope", "northing")
+wormpres.data <- as.data.frame(wormpres.data)
+p <- length(worms[worms==1]) 
+a <- length(worms[worms==0])  
+w <- p/a		
+wormpres.wts <- rep(1,length(worms))
+wormpres.wts[worms==0] <- w	
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial, 
+      weights=wormpres.wts)
+print(wormpres.glm)
+summary(wormpres.glm) 
+step(wormpres.glm) 
+wormpres.glm <- glm(as.factor(worms)~worm2.data$new_o + worm2.data$perslope, 
+       data=wormpres.data, family=binomial, weights=wormpres.wts)
+anova(wormpres.glm, test="Chi")
+wormpres.glm.p <- 1 - pchisq(wormpres.glm$null - wormpres.glm$deviance, 2) 
+wormpres.glm.p
+wormpres.glm.d <- 1 - (wormpres.glm$deviance/wormpres.glm$null)
+wormpres.glm.d
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ require('ROCR')
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ if (method==1)
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+
+# code for graph
+ggplot(worm2.data,aes(x=new_o, y=worms))+
+ geom_point(position = position_jitter(height=.02, width=0))+
+ geom_smooth(method = "glm", method.args=list(family=binomial), 
+             aes(weight = wormpres.wts))+
+ geom_hline(yintercept = .49) + 
+ labs(x="Thickness of O horizon (cm)", 
+      y= "Probability of epi-endogeic earthworm presence")+
+ ggtitle("GLM predicting epi-endogeic earthworm presence using the O horizon")+
+ theme_bw()
+
+# look at releves with only epigeic worms present vs. releves with no worms present
+# exclude releves that had epigeic earthworms plus other groups
+worm3.data <- masterlist[c(4, 5, 12, 13, 20, 26, 27, 30, 33, 40, 41, 42),
+               c(7, 8, 9, 10, 14, 17, 19, 20, 21, 24, 25, 33, 34)]
+epi.worms <- masterlist[c(4, 5, 12, 13, 20, 26, 27, 30, 33, 40, 41, 42), c(38)]
+worm.corr <- rcorr(as.matrix(worm3.data))
+worm.corr1 <- flattenCorrMatrix(worm.corr$r, worm.corr$P)
+worm.corr2 <- worm.corr1[order(worm.corr1$p),] 
+worm.corr2 # >.7: b inch & YOO, easting & slope, elevation & YOO
+worms <- epi.worms$epigeic_worms_pres
+a_horiz.aov <- aov(worm3.data$new_a~as.factor(worms))
+summary(a_horiz.aov) 
+o_horiz.aov <- aov(worm3.data$new_o~as.factor(worms))
+summary(o_horiz.aov) #
+perslope.aov <- aov(worm3.data$perslope~as.factor(worms))
+summary(perslope.aov) 
+yoo.aov <- aov(worm3.data$yoo~as.factor(worms))
+summary(yoo.aov) #
+elevft.aov <- aov(worm3.data$elev_ft~as.factor(worms))
+summary(elevft.aov)
+month.aov <- aov(worm3.data$month_now~as.factor(worms))
+summary(month.aov)
+easting.aov <- aov(worm3.data$new_utm_e~as.factor(worms))
+summary(easting.aov) 
+northing.aov <- aov(worm3.data$new_utm_n~as.factor(worms))
+summary(northing.aov)
+overstory.aov <- aov(worm3.data$overstory_new~as.factor(worms))
+summary(overstory.aov)
+e_horiz.aov <- aov(worm3.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+b_horiz.aov <- aov(worm3.data$b_inch~as.factor(worms))
+summary(b_horiz.aov)
+e_horiz.aov <- aov(worm3.data$e_inch~as.factor(worms))
+summary(e_horiz.aov)
+tex.aov <- aov(worm3.data$avg_tex~as.factor(worms))
+summary(tex.aov)
+wormpres.data <-cbind(worms, worm3.data$new_o, worm3.data$yoo)
+colnames(wormpres.data) <- c("worms","new_o", "yoo")
+wormpres.data <- as.data.frame(wormpres.data)
+wormpres.glm <- glm(as.factor(worms)~., data=wormpres.data, family=binomial)
+# problem of perfect separation
+library(logistf)
+epigeic.test <- logistf(as.factor(worms)~., data=wormpres.data, family=binomial)
+print(epigeic.test)
+summary(epigeic.test) 
+wormpres.glm.p <- 1 - pchisq(epigeic.test$null - epigeic.test$deviance, 2) 
+wormpres.glm.p
+wormpres.glm.d <- 1 - (epigeic.test$deviance/epigeic.test$null)
+wormpres.glm.d
+wormpres.pred <- prediction(wormpres.glm$fitted.values, worms)
+wormpres.perf <- performance (wormpres.pred, "tpr", "fpr")
+cutoff.ROCR <- function(pred, method="max", target=0.95) {
+ require('ROCR')
+ METHODS <- c("max","x","tpr")
+ method <- pmatch(method, METHODS)
+ if (is.na(method)) 
+  stop("invalid method")
+ if (method == -1) 
+  stop("ambiguous method")
+ perf<-performance(pred,measure="tpr",x.measure="tnr")
+ if (method==1)
+  ic<-which.max(perf@x.values[[1]]+perf@y.values[[1]])
+ if (method==2) 
+  ic<-which.min(abs(perf@y.values[[1]] - perf@x.values[[1]]))
+ if (method==3)
+  ic <- which.min(abs(perf@y.values[[1]] - target))
+ cut <- perf@alpha.values[[1]][ic]
+ cut
+}
+cutoff <- cutoff.ROCR(wormpres.pred, method="max")
+cutoff
+wormpres.glm.px <- wormpres.glm$fitted.value
+wormpres.glm.px[wormpres.glm.px<cutoff] <- 0
+wormpres.glm.px[wormpres.glm.px>=cutoff] <- 1
+table2 <- table(wormpres.glm.px,worms)
+table2
+
+# graph of the probability of the presence of earthworms using ecogroup sum
+ggplot(worm.data,aes(x=ecogroup_sum, y=new_o))+
+ geom_point(shape=3,position = position_jitter(height=0, width=.1))+
+ geom_smooth(method = "glm", 
+             aes(weight = wormpres.wts)) + 
+ labs(x="Sum of invasive earthworm ecological groups", 
+      y= "Thickness of O horizon (cm)")+
+ ggtitle(" ")+
+ theme_bw()
+
+summary(lm(ecogroup_sum ~ new_o, weights = wormpres.wts, data = worm.data))
